@@ -1,0 +1,1 @@
+python train_net_video.py --config-file configs/video/sparse_inst_r50_giam_video.yaml MODEL.WEIGHTS checkpoints/sparse_inst_r50_giam_aug_2b7d68.pth SOLVER.IMS_PER_BATCH 2
