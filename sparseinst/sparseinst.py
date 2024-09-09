@@ -186,13 +186,10 @@ class SparseInst(nn.Module):
             return video_targets
 
     def frame_decoder_loss_reshape(self, outputs, targets):
-        # Insert time dimension
-        outputs['pred_masks'] = outputs['pred_masks'].unsqueeze(2)
-        outputs['pred_logits'] = outputs['pred_logits'].unsqueeze(1)
-        
         # Prepare for targets
         outputs['pred_masks'] = einops.rearrange(outputs['pred_masks'], 'b q t h w -> (b t) q () h w')
         outputs['pred_logits'] = einops.rearrange(outputs['pred_logits'], 'b t q c -> (b t) q c')
+        outputs['pred_scores'] = einops.rearrange(outputs['pred_scores'], 'b t q c -> (b t) q c')
 
         gt_instances = []
         for targets_per_video in targets:
@@ -233,7 +230,6 @@ class SparseInst(nn.Module):
             features = self.backbone(images.tensor)
             features = self.encoder(features)
             outputs = self.decoder(features)
-
         if self.training:
             if self.video_task:
                 if self.use_contrastive:
@@ -257,8 +253,7 @@ class SparseInst(nn.Module):
                 outputs = self.post_processing(outputs)
                 mask_cls_results = outputs["pred_logits"]
                 mask_pred_results = outputs["pred_masks"]
-
-                mask_cls_result = mask_cls_results[0]
+                mask_cls_result = mask_cls_results[0]   # t, q, C -> q, C
                 mask_pred_result = mask_pred_results[0]
                 first_resize_size = (images.tensor.shape[-2], images.tensor.shape[-1])
 
@@ -354,10 +349,10 @@ class SparseInst(nn.Module):
 
         # merge outputs
         outputs = {}
-        outputs['pred_logits'] = torch.cat([x['pred_logits'] for x in out_list], dim=0).detach() # t, q, C
-        outputs['pred_scores'] = torch.cat([x['pred_scores'] for x in out_list], dim=0).detach() # t, q, 1
-        outputs['pred_masks'] = torch.cat([x['pred_masks'] for x in out_list], dim=0).detach() # t, q, h, w
-        outputs['pred_embds'] = torch.cat([x['pred_embds'] for x in out_list], dim=0).detach() # t, q, c
+        outputs['pred_logits'] = torch.cat([x['pred_logits'] for x in out_list], dim=1).detach()
+        outputs['pred_scores'] = torch.cat([x['pred_scores'] for x in out_list], dim=1).detach()
+        outputs['pred_masks'] = torch.cat([x['pred_masks'] for x in out_list], dim=2).detach()
+        outputs['pred_embds'] = torch.cat([x['pred_embds'] for x in out_list], dim=2).detach()
 
         return outputs
 
@@ -377,14 +372,16 @@ class SparseInst(nn.Module):
         return indices
 
     def post_processing(self, outputs):
-        # pred_logits: t q C
-        # pred_masks: t q h w
-        # pred_embdsL: t q c
         pred_logits, pred_scores, pred_masks, pred_embds = outputs['pred_logits'], outputs['pred_scores'], outputs['pred_masks'], outputs['pred_embds']
-
-        pred_logits = pred_logits.sigmoid()
-        pred_objectness = pred_scores.sigmoid()
-        pred_logits = torch.sqrt(pred_logits * pred_objectness)
+        # pred_logits = pred_logits.sigmoid()
+        # pred_objectness = pred_scores.sigmoid()
+        # pred_logits = torch.sqrt(pred_logits * pred_objectness)
+        pred_logits = pred_logits.softmax(dim=-1)
+        pred_masks = pred_masks.sigmoid()
+        
+        pred_logits = pred_logits[0]
+        pred_masks = einops.rearrange(pred_masks[0], 'q t h w -> t q h w')
+        pred_embds = einops.rearrange(pred_embds[0], 'c t q -> t q c')
 
         pred_logits = list(torch.unbind(pred_logits))
         pred_masks = list(torch.unbind(pred_masks))
@@ -425,7 +422,9 @@ class SparseInst(nn.Module):
             labels_per_image = labels[topk_indices]
             topk_indices = topk_indices // self.decoder.inst_branch.num_classes
             pred_masks = pred_masks[topk_indices]
-
+            # import pdb; pdb.set_trace()
+            # scores = rescoring_mask(scores, mask_pred_per_image > self.mask_threshold, mask_pred_per_image)
+            
             pred_masks = F.interpolate(pred_masks, size=first_resize_size, mode="bilinear", align_corners=False)
 
             pred_masks = pred_masks[:, :, : img_size[0], : img_size[1]]

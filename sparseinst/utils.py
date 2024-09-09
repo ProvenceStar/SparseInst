@@ -2,7 +2,6 @@
 from typing import Optional, List
 
 import torch
-from torchvision.ops.boxes import box_area
 from torch import Tensor
 import torch.distributed as dist
 import torch.nn.functional as F

@@ -1,6 +1,7 @@
 # Copyright (c) Tianheng Cheng and its affiliates. All Rights Reserved
 
 import math
+import einops
 import torch
 import torch.nn as nn
 from torch.nn import init
@@ -121,7 +122,9 @@ class BaseIAMDecoder(nn.Module):
 
         self.inst_branch = InstanceBranch(cfg, in_channels)
         self.mask_branch = MaskBranch(cfg, in_channels)
+        self.video_task = cfg.MODEL.SPARSE_INST.VIDEO_TASK
         self.use_contrastive = cfg.INPUT.CONTRASTIVE_LEARNING
+        self.num_frames = cfg.INPUT.SAMPLING_FRAME_NUM
         if self.use_contrastive:
             kernel_dim = cfg.MODEL.SPARSE_INST.DECODER.KERNEL_DIM
             self.track_embed = nn.Linear(kernel_dim, kernel_dim)
@@ -156,24 +159,36 @@ class BaseIAMDecoder(nn.Module):
         mask_features = self.mask_branch(features)
 
         N = pred_kernel.shape[1]
-        # mask_features: BxCxHxW
-        B, C, H, W = mask_features.shape
-        pred_masks = torch.bmm(pred_kernel, mask_features.view(B, C, H * W)).view(B, N, H, W)
-
-        pred_masks = F.interpolate(pred_masks, scale_factor=self.scale_factor, mode='bilinear', align_corners=False)
-        
-        if self.use_contrastive:
-            pred_embds = self.track_embed(pred_kernel)
+        if self.video_task:
+            BT, C, H, W = mask_features.shape
+            B = BT // self.num_frames if self.training else 1
+            T = BT // B
+            pred_logits = einops.rearrange(pred_logits, '(b t) q c -> b t q c', t=T)
+            pred_scores = einops.rearrange(pred_scores, '(b t) q c -> b t q c', t=T)
+            pred_masks = torch.einsum("bqc,bchw->bqhw", pred_kernel, mask_features)
+            pred_masks = F.interpolate(pred_masks, scale_factor=self.scale_factor, mode='bilinear', align_corners=False)
+            pred_masks = einops.rearrange(pred_masks, '(b t) q h w -> b q t h w', t=T)
+            pred_embds = self.track_embed(pred_kernel) if self.use_contrastive else pred_kernel
+            pred_embds = einops.rearrange(pred_embds, '(b t) q c -> b c t q', t=T)
+            
+            output = {
+                "pred_logits": pred_logits,
+                "pred_masks": pred_masks,
+                "pred_scores": pred_scores,
+                "pred_embds": pred_embds,
+            }
         else:
-            pred_embds = pred_kernel
-        
-        output = {
-            "pred_logits": pred_logits,
-            "pred_masks": pred_masks,
-            "pred_scores": pred_scores,
-            "pred_embds": pred_embds,
-        }
+            # mask_features: BxCxHxW
+            B, C, H, W = mask_features.shape
+            pred_masks = torch.bmm(pred_kernel, mask_features.view(B, C, H * W)).view(B, N, H, W)
+            pred_masks = F.interpolate(pred_masks, scale_factor=self.scale_factor, mode='bilinear', align_corners=False)
 
+            output = {
+                "pred_logits": pred_logits,
+                "pred_masks": pred_masks,
+                "pred_scores": pred_scores,
+            }
+            
         if self.output_iam:
             iam = F.interpolate(iam, scale_factor=self.scale_factor, mode='bilinear', align_corners=False)
             output['pred_iam'] = iam
