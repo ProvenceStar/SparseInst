@@ -373,11 +373,11 @@ class SparseInst(nn.Module):
 
     def post_processing(self, outputs):
         pred_logits, pred_scores, pred_masks, pred_embds = outputs['pred_logits'], outputs['pred_scores'], outputs['pred_masks'], outputs['pred_embds']
-        # pred_logits = pred_logits.sigmoid()
-        # pred_objectness = pred_scores.sigmoid()
-        # pred_logits = torch.sqrt(pred_logits * pred_objectness)
-        pred_logits = pred_logits.softmax(dim=-1)
-        pred_masks = pred_masks.sigmoid()
+        pred_logits = pred_logits.sigmoid()
+        pred_objectness = pred_scores.sigmoid()
+        pred_logits = torch.sqrt(pred_logits * pred_objectness)
+        # pred_logits = pred_logits.softmax(dim=-1)
+        # pred_masks = pred_masks.sigmoid()
         
         pred_logits = pred_logits[0]
         pred_masks = einops.rearrange(pred_masks[0], 'q t h w -> t q h w')
@@ -418,7 +418,7 @@ class SparseInst(nn.Module):
             nq = pred_cls.shape[0]
             labels = torch.arange(self.decoder.inst_branch.num_classes, device=self.device).unsqueeze(0).repeat(nq, 1).flatten(0, 1)
             # keep top-10 predictions
-            scores_per_image, topk_indices = scores.flatten(0, 1).topk(10, sorted=False)
+            scores_per_image, topk_indices = scores.flatten(0, 1).topk(30, sorted=False)
             labels_per_image = labels[topk_indices]
             topk_indices = topk_indices // self.decoder.inst_branch.num_classes
             pred_masks = pred_masks[topk_indices]

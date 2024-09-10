@@ -49,7 +49,7 @@ def add_sparse_inst_config(cfg):
     cfg.MODEL.SPARSE_INST.LOSS.NAME = "SparseInstCriterion"
     cfg.MODEL.SPARSE_INST.LOSS.ITEMS = ("labels", "masks")
     # loss weight
-    cfg.MODEL.SPARSE_INST.LOSS.CLASS_WEIGHT = 4.0
+    cfg.MODEL.SPARSE_INST.LOSS.CLASS_WEIGHT = 2.0
     cfg.MODEL.SPARSE_INST.LOSS.MASK_PIXEL_WEIGHT = 5.0
     cfg.MODEL.SPARSE_INST.LOSS.MASK_DICE_WEIGHT = 3.0
     # iou-aware objectness loss weight
